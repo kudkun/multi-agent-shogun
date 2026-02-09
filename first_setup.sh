@@ -551,8 +551,11 @@ SCRIPTS=(
 
 for script in "${SCRIPTS[@]}"; do
     if [ -f "$SCRIPT_DIR/$script" ]; then
-        chmod +x "$SCRIPT_DIR/$script"
-        log_info "$script に実行権限を付与しました"
+        if chmod +x "$SCRIPT_DIR/$script" 2>/dev/null; then
+            log_info "$script に実行権限を付与しました"
+        else
+            log_warn "$script の権限変更をスキップ（WSL/Windows FS）"
+        fi
     fi
 done
 

@@ -809,6 +809,11 @@ NINJA_EOF
 
     # inbox ディレクトリ初期化（シンボリックリンク先のLinux FSに作成）
     mkdir -p "$SCRIPT_DIR/logs"
+
+    # inbox 実体ディレクトリを作成（シンボリックリンク先）
+    INBOX_LINUX_DIR="$HOME/.local/share/multi-agent-shogun/inbox"
+    mkdir -p "$INBOX_LINUX_DIR"
+
     # 動的リスト生成
     AGENT_LIST="shogun karo"
     for i in $(seq 1 $NUM_ASHIGARU); do
@@ -883,17 +888,16 @@ echo "     ┌──────────────────────
 echo "     │  Pane 0: 将軍 (SHOGUN)      │  ← 総大将・プロジェクト統括"
 echo "     └─────────────────────────────┘"
 echo ""
-echo "     【multiagentセッション】家老・足軽の陣（3x3 = 9ペイン）"
-echo "     ┌─────────┬─────────┬─────────┐"
-echo "     │  karo   │ashigaru3│ashigaru6│"
-echo "     │  (家老) │ (足軽3) │ (足軽6) │"
-echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru1│ashigaru4│ashigaru7│"
-echo "     │ (足軽1) │ (足軽4) │ (足軽7) │"
-echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru2│ashigaru5│ashigaru8│"
-echo "     │ (足軽2) │ (足軽5) │ (足軽8) │"
-echo "     └─────────┴─────────┴─────────┘"
+TOTAL_PANES_DISPLAY=$((NUM_ASHIGARU + 1))
+echo "     【multiagentセッション】家老・足軽の陣（${TOTAL_PANES_DISPLAY}ペイン: karo + ashigaru1-${NUM_ASHIGARU}）"
+echo "     3列 x ${ROWS}行のグリッドレイアウト"
+echo ""
+echo "     配置: karo（家老） + 足軽${NUM_ASHIGARU}名"
+if [ "$KESSEN_MODE" = true ]; then
+    echo "     モデル: 全員 Opus（決戦の陣）"
+else
+    echo "     モデル: 足軽1-${SPLIT_POINT}=Sonnet, 足軽$((SPLIT_POINT+1))-${NUM_ASHIGARU}=Opus"
+fi
 echo ""
 
 echo ""
