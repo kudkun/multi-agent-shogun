@@ -44,6 +44,12 @@ log_step() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 足軽の数を設定から読み込み（デフォルト: 8）
+NUM_ASHIGARU=8
+if [ -f "$SCRIPT_DIR/config/settings.yaml" ]; then
+    NUM_ASHIGARU=$(grep "^  num_ashigaru:" "$SCRIPT_DIR/config/settings.yaml" 2>/dev/null | awk '{print $2}' || echo "8")
+fi
+
 # 結果追跡用変数
 RESULTS=()
 HAS_ERROR=false
@@ -425,6 +431,14 @@ language: ja
 # zsh: zsh用プロンプト
 shell: bash
 
+# エージェント構成
+agents:
+  num_ashigaru: 8  # 足軽の数 (Range: 2-20, Default: 8)
+  # モデル割り当て（平時モード、--kessen 未指定時）:
+  # - 前半（1 〜 N/2）: Sonnet（低コスト）
+  # - 後半（N/2+1 〜 N）: Opus（高性能）
+  # 奇数の場合、Opus に余剰エージェントを配分
+
 # スキル設定
 skill:
   # スキル保存先（スキル名に shogun- プレフィックスを付けて保存）
@@ -490,7 +504,7 @@ RESULTS+=("設定ファイル: OK")
 log_step "STEP 8: キューファイル初期化"
 
 # 足軽用タスクファイル作成
-for i in {1..8}; do
+for i in $(seq 1 $NUM_ASHIGARU); do
     TASK_FILE="$SCRIPT_DIR/queue/tasks/ashigaru${i}.yaml"
     if [ ! -f "$TASK_FILE" ]; then
         cat > "$TASK_FILE" << EOF
@@ -505,10 +519,10 @@ task:
 EOF
     fi
 done
-log_info "足軽タスクファイル (1-8) を確認/作成しました"
+log_info "足軽タスクファイル (1-${NUM_ASHIGARU}) を確認/作成しました"
 
 # 足軽用レポートファイル作成
-for i in {1..8}; do
+for i in $(seq 1 $NUM_ASHIGARU); do
     REPORT_FILE="$SCRIPT_DIR/queue/reports/ashigaru${i}_report.yaml"
     if [ ! -f "$REPORT_FILE" ]; then
         cat > "$REPORT_FILE" << EOF
@@ -520,7 +534,7 @@ result: null
 EOF
     fi
 done
-log_info "足軽レポートファイル (1-8) を確認/作成しました"
+log_info "足軽レポートファイル (1-${NUM_ASHIGARU}) を確認/作成しました"
 
 RESULTS+=("キューファイル: OK")
 

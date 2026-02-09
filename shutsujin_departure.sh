@@ -26,6 +26,28 @@ if [ -f "./config/settings.yaml" ]; then
     SHELL_SETTING=$(grep "^shell:" ./config/settings.yaml 2>/dev/null | awk '{print $2}' || echo "bash")
 fi
 
+# 足軽の数を読み取り（デフォルト: 8）
+NUM_ASHIGARU=8
+if [ -f "./config/settings.yaml" ]; then
+    NUM_ASHIGARU=$(grep "^  num_ashigaru:" ./config/settings.yaml 2>/dev/null | awk '{print $2}' || echo "8")
+fi
+
+# 足軽数のバリデーション（2-20の範囲）
+if ! [[ "$NUM_ASHIGARU" =~ ^[0-9]+$ ]] || [ "$NUM_ASHIGARU" -lt 2 ] || [ "$NUM_ASHIGARU" -gt 20 ]; then
+    echo ""
+    echo "  ╔════════════════════════════════════════════════════════╗"
+    echo "  ║  [ERROR] Invalid num_ashigaru configuration           ║"
+    echo "  ║  無効な足軽数設定                                       ║"
+    echo "  ╠════════════════════════════════════════════════════════╣"
+    echo "  ║  Value: $NUM_ASHIGARU (must be 2-20)                    ║"
+    echo "  ║  設定値: $NUM_ASHIGARU （2〜20の範囲で指定してください） ║"
+    echo "  ║                                                        ║"
+    echo "  ║  Edit: config/settings.yaml                           ║"
+    echo "  ╚════════════════════════════════════════════════════════╝"
+    echo ""
+    exit 1
+fi
+
 # CLI Adapter読み込み（Multi-CLI Support）
 if [ -f "$SCRIPT_DIR/lib/cli_adapter.sh" ]; then
     source "$SCRIPT_DIR/lib/cli_adapter.sh"
@@ -157,11 +179,10 @@ while [[ $# -gt 0 ]]; do
             echo "モデル構成:"
             echo "  将軍:      Opus（デフォルト。--shogun-no-thinkingで無効化）"
             echo "  家老:      Opus"
-            echo "  足軽1-4:   Sonnet"
-            echo "  足軽5-8:   Opus"
+            echo "  足軽:      前半Sonnet、後半Opus（設定: config/settings.yaml の num_ashigaru）"
             echo ""
             echo "陣形:"
-            echo "  平時の陣（デフォルト）: 足軽1-4=Sonnet, 足軽5-8=Opus"
+            echo "  平時の陣（デフォルト）: 足軽1-N/2=Sonnet, N/2+1-N=Opus"
             echo "  決戦の陣（--kessen）:   全足軽=Opus"
             echo ""
             echo "表示モード:"
@@ -222,7 +243,7 @@ show_battle_cry() {
     # 足軽隊列（オリジナル）
     # ═══════════════════════════════════════════════════════════════════════════
     echo -e "\033[1;34m  ╔═════════════════════════════════════════════════════════════════════════════╗\033[0m"
-    echo -e "\033[1;34m  ║\033[0m                    \033[1;37m【 足 軽 隊 列 ・ 八 名 配 備 】\033[0m                      \033[1;34m║\033[0m"
+    echo -e "\033[1;34m  ║\033[0m                    \033[1;37m【 足 軽 隊 列 ・ ${NUM_ASHIGARU}名 配 備 】\033[0m                      \033[1;34m║\033[0m"
     echo -e "\033[1;34m  ╚═════════════════════════════════════════════════════════════════════════════╝\033[0m"
 
     cat << 'ASHIGARU_EOF'
@@ -314,7 +335,7 @@ if [ "$CLEAN_MODE" = true ]; then
     log_info "📜 前回の軍議記録を破棄中..."
 
     # 足軽タスクファイルリセット
-    for i in {1..8}; do
+    for i in $(seq 1 $NUM_ASHIGARU); do
         cat > ./queue/tasks/ashigaru${i}.yaml << EOF
 # 足軽${i}専用タスクファイル
 task:
@@ -328,7 +349,7 @@ EOF
     done
 
     # 足軽レポートファイルリセット
-    for i in {1..8}; do
+    for i in $(seq 1 $NUM_ASHIGARU); do
         cat > ./queue/reports/ashigaru${i}_report.yaml << EOF
 worker_id: ashigaru${i}
 task_id: null
@@ -341,8 +362,12 @@ EOF
     # ntfy inbox リセット
     echo "inbox:" > ./queue/ntfy_inbox.yaml
 
-    # agent inbox リセット
-    for agent in shogun karo ashigaru{1..8}; do
+    # agent inbox リセット（動的リスト生成）
+    AGENT_LIST="shogun karo"
+    for i in $(seq 1 $NUM_ASHIGARU); do
+        AGENT_LIST="$AGENT_LIST ashigaru${i}"
+    done
+    for agent in $AGENT_LIST; do
         echo "messages:" > "./queue/inbox/${agent}.yaml"
     done
 
@@ -493,49 +518,66 @@ else
     tmux set-environment -t multiagent DISPLAY_MODE "shout"
 fi
 
-# 3x3グリッド作成（合計9ペイン）
-# ペイン番号は pane-base-index に依存（0 または 1）
-# 最初に3列に分割
+# 動的グリッド作成（3列固定、行数は足軽数に応じて調整）
+TOTAL_PANES=$((NUM_ASHIGARU + 1))  # +1 for karo
+COLS=3
+ROWS=$(( (TOTAL_PANES + COLS - 1) / COLS ))  # Ceiling division
+
+# 3列に分割
 tmux split-window -h -t "multiagent:agents"
 tmux split-window -h -t "multiagent:agents"
 
-# 各列を3行に分割
-tmux select-pane -t "multiagent:agents.${PANE_BASE}"
-tmux split-window -v
-tmux split-window -v
+# 各列をROWS行に分割
+for c in {0..2}; do
+    base_pane=$((PANE_BASE + c * ROWS))
+    for r in $(seq 2 $ROWS); do
+        tmux select-pane -t "multiagent:agents.${base_pane}"
+        tmux split-window -v
+    done
+done
 
-tmux select-pane -t "multiagent:agents.$((PANE_BASE+3))"
-tmux split-window -v
-tmux split-window -v
+# 動的配列生成（karo + ashigaru×NUM_ASHIGARU）
+PANE_LABELS=("karo")
+PANE_COLORS=("red")
+AGENT_IDS=("karo")
 
-tmux select-pane -t "multiagent:agents.$((PANE_BASE+6))"
-tmux split-window -v
-tmux split-window -v
+# モデル割り当て分割点（前半=Sonnet, 後半=Opus）
+SPLIT_POINT=$((NUM_ASHIGARU / 2))
 
-# ペインラベル設定（プロンプト用: モデル名なし）
-PANE_LABELS=("karo" "ashigaru1" "ashigaru2" "ashigaru3" "ashigaru4" "ashigaru5" "ashigaru6" "ashigaru7" "ashigaru8")
-# ペインタイトル設定（tmuxタイトル用: モデル名付き）
+# 決戦モードかどうかで初期モデル名を設定
 if [ "$KESSEN_MODE" = true ]; then
-    PANE_TITLES=("Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus")
+    PANE_TITLES=("Opus")
+    MODEL_NAMES=("Opus")
 else
-    PANE_TITLES=("Opus" "Sonnet" "Sonnet" "Sonnet" "Sonnet" "Opus" "Opus" "Opus" "Opus")
+    PANE_TITLES=("Opus")  # karo は常に Opus
+    MODEL_NAMES=("Opus")
 fi
-# 色設定（karo: 赤, ashigaru: 青）
-PANE_COLORS=("red" "blue" "blue" "blue" "blue" "blue" "blue" "blue" "blue")
 
-AGENT_IDS=("karo" "ashigaru1" "ashigaru2" "ashigaru3" "ashigaru4" "ashigaru5" "ashigaru6" "ashigaru7" "ashigaru8")
+# 足軽エージェントを動的追加
+for i in $(seq 1 $NUM_ASHIGARU); do
+    PANE_LABELS+=("ashigaru${i}")
+    AGENT_IDS+=("ashigaru${i}")
+    PANE_COLORS+=("blue")
 
-# モデル名設定（pane-border-format で常時表示するため）
-# デフォルト（Claude用）
-if [ "$KESSEN_MODE" = true ]; then
-    MODEL_NAMES=("Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus" "Opus")
-else
-    MODEL_NAMES=("Opus" "Sonnet" "Sonnet" "Sonnet" "Sonnet" "Opus" "Opus" "Opus" "Opus")
-fi
+    # モデル割り当て（決戦 vs 平時）
+    if [ "$KESSEN_MODE" = true ]; then
+        PANE_TITLES+=("Opus")
+        MODEL_NAMES+=("Opus")
+    else
+        if [ $i -le $SPLIT_POINT ]; then
+            PANE_TITLES+=("Sonnet")
+            MODEL_NAMES+=("Sonnet")
+        else
+            PANE_TITLES+=("Opus")
+            MODEL_NAMES+=("Opus")
+        fi
+    fi
+done
 
 # CLI Adapter経由でモデル名を動的に上書き
 if [ "$CLI_ADAPTER_LOADED" = true ]; then
-    for i in {0..8}; do
+    TOTAL_AGENTS=$((NUM_ASHIGARU + 1))  # karo + ashigaru
+    for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
         _agent="${AGENT_IDS[$i]}"
         _cli=$(get_cli_type "$_agent")
         case "$_cli" in
@@ -557,7 +599,8 @@ if [ "$CLI_ADAPTER_LOADED" = true ]; then
     done
 fi
 
-for i in {0..8}; do
+TOTAL_AGENTS=$((NUM_ASHIGARU + 1))  # karo + ashigaru
+for i in $(seq 0 $((TOTAL_AGENTS - 1))); do
     p=$((PANE_BASE + i))
     tmux select-pane -t "multiagent:agents.${p}" -T "${PANE_TITLES[$i]}"
     tmux set-option -p -t "multiagent:agents.${p}" @agent_id "${AGENT_IDS[$i]}"
@@ -631,7 +674,7 @@ if [ "$SETUP_ONLY" = false ]; then
 
     if [ "$KESSEN_MODE" = true ]; then
         # 決戦の陣: CLI Adapter経由（claudeはOpus強制）
-        for i in {1..8}; do
+        for i in $(seq 1 $NUM_ASHIGARU); do
             p=$((PANE_BASE + i))
             _ashi_cli_type="claude"
             _ashi_cmd="claude --model opus --dangerously-skip-permissions"
@@ -648,13 +691,13 @@ if [ "$SETUP_ONLY" = false ]; then
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
         done
-        log_info "  └─ 足軽1-8（決戦の陣）、召喚完了"
+        log_info "  └─ 足軽1-${NUM_ASHIGARU}（決戦の陣）、召喚完了"
     else
-        # 平時の陣: CLI Adapter経由（デフォルト: 1-4=Sonnet, 5-8=Opus）
-        for i in {1..8}; do
+        # 平時の陣: CLI Adapter経由（デフォルト: 前半=Sonnet, 後半=Opus）
+        for i in $(seq 1 $NUM_ASHIGARU); do
             p=$((PANE_BASE + i))
             _ashi_cli_type="claude"
-            if [ $i -le 4 ]; then
+            if [ $i -le $SPLIT_POINT ]; then
                 _ashi_cmd="claude --model sonnet --dangerously-skip-permissions"
             else
                 _ashi_cmd="claude --model opus --dangerously-skip-permissions"
@@ -667,7 +710,7 @@ if [ "$SETUP_ONLY" = false ]; then
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
         done
-        log_info "  └─ 足軽1-8（平時の陣）、召喚完了"
+        log_info "  └─ 足軽1-${NUM_ASHIGARU}（平時の陣）、召喚完了"
     fi
 
     if [ "$KESSEN_MODE" = true ]; then
@@ -766,7 +809,12 @@ NINJA_EOF
 
     # inbox ディレクトリ初期化（シンボリックリンク先のLinux FSに作成）
     mkdir -p "$SCRIPT_DIR/logs"
-    for agent in shogun karo ashigaru{1..8}; do
+    # 動的リスト生成
+    AGENT_LIST="shogun karo"
+    for i in $(seq 1 $NUM_ASHIGARU); do
+        AGENT_LIST="$AGENT_LIST ashigaru${i}"
+    done
+    for agent in $AGENT_LIST; do
         [ -f "$SCRIPT_DIR/queue/inbox/${agent}.yaml" ] || echo "messages:" > "$SCRIPT_DIR/queue/inbox/${agent}.yaml"
     done
 
@@ -784,7 +832,7 @@ NINJA_EOF
     disown
 
     # 足軽のwatcher
-    for i in {1..8}; do
+    for i in $(seq 1 $NUM_ASHIGARU); do
         p=$((PANE_BASE + i))
         _ashi_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${p}" -v @agent_cli 2>/dev/null || echo "claude")
         nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "ashigaru${i}" "multiagent:agents.${p}" "$_ashi_watcher_cli" \
@@ -792,7 +840,8 @@ NINJA_EOF
         disown
     done
 
-    log_success "  └─ 9エージェント分のinbox_watcher起動完了（将軍は除外）"
+    TOTAL_WATCHERS=$((NUM_ASHIGARU + 1))  # karo + ashigaru
+    log_success "  └─ ${TOTAL_WATCHERS}エージェント分のinbox_watcher起動完了（将軍は除外）"
 
     # STEP 6.7 は廃止 — CLAUDE.md Session Start (step 1: tmux agent_id) で各自が自律的に
     # 自分のinstructions/*.mdを読み込む。検証済み (2026-02-08)。
